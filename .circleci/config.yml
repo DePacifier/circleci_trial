@@ -1,11 +1,65 @@
 version: 2.1
+orbs:
+  python: circleci/python@2.0.3
+
 jobs:
-  build:
-    docker:
-      - image: alpine:3.15
+  install_code_quality_check_libraries:
+    executor: python/default
+    steps:
+      - checkout # can be ignored if checkout exists in a previous job
+      - python/install-packages:
+          pkg-manager: pip
+      - run:
+          name: Install
+          command: pip install flake8 pydocstyle radon mypy vulture eradicate
+
+  perform_code_quality_check:
+    executor: python/default
     steps:
       - run:
-          name: The First Step
-          command: |
-            echo 'Hello World!'
-            echo 'This is the delivery pipeline'
+          name: Run flake8 check
+          command: flake8 --count --statistics --max-line-length=120
+      - run:
+          name: Run pydocstyle check
+          command: pydocstyle --explain --source --count
+      - run:
+          name: Run mypy static type check
+          command: mypy .
+      - run:
+          name: Run radon code-complexity check
+          command: radon cc --show-complexity --average --min B --max C .
+      - run:
+          name: Run radon maintainability index score check
+          command: radon mi --min A --max B .
+      - run:
+          name: Run radon raw metrics calculation
+          command: radon raw --json .
+
+  perform_code_quality_fix:
+    executor: python/default
+    steps:
+      - run:
+          name: Run vulture to remove totally unused code
+          command: vulture . --min-confidence 100
+      - run:
+          name: Run eradicate to remove commented out code
+          command: eradicate --in-place *.py
+
+workflows:
+  # Integrate code quality check job and previous workflow here
+  workflow_with_code_quality_check:
+    jobs:
+      # add other prerequisite runs (like package installation) here if needed
+
+      - install_code_quality_check_libraries
+      - perform_code_quality_check
+      - perform_code_quality_fix
+      - Hold-for-Approval:
+          description: Check if all code-quality standards are satisfied
+          type: approval
+          requires:
+            - install_code_quality_check_libraries
+            - perform_code_quality_check
+            - perform_code_quality_fix
+
+      # add other additional runs (like deployment) here
